@@ -1,0 +1,17 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - run: dotnet build src/FeatherShield/FeatherShield.csproj --configuration Release
+      - run: dotnet test tests/FeatherShield.Tests/FeatherShield.Tests.csproj --configuration Release
