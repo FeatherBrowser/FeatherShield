@@ -4,6 +4,7 @@ public enum ResourceType
 {
     Other,
     Document,
+    Subdocument,
     Script,
     Image,
     Stylesheet,
@@ -11,5 +12,7 @@ public enum ResourceType
     XmlHttpRequest,
     Fetch,
     Ping,
-    Media
+    Media,
+    WebSocket,
+    Object
 }

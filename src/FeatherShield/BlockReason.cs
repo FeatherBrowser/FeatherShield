@@ -5,7 +5,6 @@ public enum BlockReason
     None,
     Allowlisted,
     ExceptionRule,
-    BlockedDomain,
-    UrlRule,
+    NetworkRule,
     ThirdPartyTracker
 }

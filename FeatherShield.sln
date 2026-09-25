@@ -2,9 +2,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FeatherShield", "src\FeatherShield\FeatherShield.csproj", "{4BDE9217-5DDD-44AA-9449-D7F6FDC646E9}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FeatherShield", "src\FeatherShield\FeatherShield.csproj", "{6D1D631A-53DB-4C3B-84CB-1FBC18E19600}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FeatherShield.Tests", "tests\FeatherShield.Tests\FeatherShield.Tests.csproj", "{6ABF96BB-1540-49AA-87C2-53C67AFA70E0}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FeatherShield.Tests", "tests\FeatherShield.Tests\FeatherShield.Tests.csproj", "{4C0E432A-59B8-4B95-916F-783444129932}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -12,13 +12,13 @@ Global
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{4BDE9217-5DDD-44AA-9449-D7F6FDC646E9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{4BDE9217-5DDD-44AA-9449-D7F6FDC646E9}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{4BDE9217-5DDD-44AA-9449-D7F6FDC646E9}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{4BDE9217-5DDD-44AA-9449-D7F6FDC646E9}.Release|Any CPU.Build.0 = Release|Any CPU
-		{6ABF96BB-1540-49AA-87C2-53C67AFA70E0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{6ABF96BB-1540-49AA-87C2-53C67AFA70E0}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{6ABF96BB-1540-49AA-87C2-53C67AFA70E0}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{6ABF96BB-1540-49AA-87C2-53C67AFA70E0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6D1D631A-53DB-4C3B-84CB-1FBC18E19600}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6D1D631A-53DB-4C3B-84CB-1FBC18E19600}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6D1D631A-53DB-4C3B-84CB-1FBC18E19600}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6D1D631A-53DB-4C3B-84CB-1FBC18E19600}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4C0E432A-59B8-4B95-916F-783444129932}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4C0E432A-59B8-4B95-916F-783444129932}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4C0E432A-59B8-4B95-916F-783444129932}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4C0E432A-59B8-4B95-916F-783444129932}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

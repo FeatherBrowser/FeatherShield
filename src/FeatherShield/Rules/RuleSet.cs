@@ -1,31 +1,46 @@
-using FeatherShield.Rules;
+using FeatherShield.Matching;
 
-namespace FeatherShield;
+namespace FeatherShield.Rules;
 
 public sealed class RuleSet
 {
-    internal HashSet<string> BlockedDomains { get; } = new(StringComparer.OrdinalIgnoreCase);
-    internal HashSet<string> ExceptionDomains { get; } = new(StringComparer.OrdinalIgnoreCase);
-    internal List<UrlPattern> UrlRules { get; } = [];
-    internal List<UrlPattern> ExceptionUrlRules { get; } = [];
-    internal List<string> TrackingTokens { get; } = [];
-    internal HashSet<string> TrackingParameters { get; } = new(StringComparer.OrdinalIgnoreCase);
+    private readonly RuleIndex _blocking = new();
+    private readonly RuleIndex _exceptions = new();
+    private readonly List<CosmeticRule> _cosmeticRules = [];
 
-    public int BlockedDomainCount => BlockedDomains.Count;
-    public int ExceptionDomainCount => ExceptionDomains.Count;
-    public int UrlRuleCount => UrlRules.Count;
+    internal List<string> TrackingTokens { get; } = [];
+    internal HashSet<string> TrackingParameters { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    public int NetworkRuleCount => _blocking.Count;
+    public int ExceptionRuleCount => _exceptions.Count;
+    public int CosmeticRuleCount => _cosmeticRules.Count;
     public int TrackingTokenCount => TrackingTokens.Count;
     public int TrackingParameterCount => TrackingParameters.Count;
 
-    public bool AddBlockedDomain(string domain) =>
-        BlockedDomains.Add(NormalizeDomain(domain));
+    // Compatibility with Feather Browser 1.x adapter diagnostics.
+    public int BlockedDomainCount => NetworkRuleCount;
+    public int ExceptionDomainCount => ExceptionRuleCount;
+    public int UrlRuleCount => NetworkRuleCount;
 
-    public bool AddExceptionDomain(string domain) =>
-        ExceptionDomains.Add(NormalizeDomain(domain));
+    internal void Add(NetworkRule rule) =>
+        (rule.IsException ? _exceptions : _blocking).Add(rule);
+
+    internal void Add(CosmeticRule rule) =>
+        _cosmeticRules.Add(rule);
+
+    internal IEnumerable<NetworkRule> BlockingCandidates(string host) =>
+        _blocking.Candidates(host);
+
+    internal IEnumerable<NetworkRule> ExceptionCandidates(string host) =>
+        _exceptions.Candidates(host);
+
+    internal IEnumerable<CosmeticRule> CosmeticRules => _cosmeticRules;
 
     public void AddTrackingToken(string token)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(token);
+
         if (!TrackingTokens.Contains(token, StringComparer.OrdinalIgnoreCase))
             TrackingTokens.Add(token.Trim());
     }
@@ -34,25 +49,5 @@ public sealed class RuleSet
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(parameter);
         return TrackingParameters.Add(parameter.Trim());
-    }
-
-    public void Clear()
-    {
-        BlockedDomains.Clear();
-        ExceptionDomains.Clear();
-        UrlRules.Clear();
-        ExceptionUrlRules.Clear();
-        TrackingTokens.Clear();
-        TrackingParameters.Clear();
-    }
-
-    private static string NormalizeDomain(string value)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(value);
-        string raw = value.Trim();
-        if (Uri.TryCreate(raw, UriKind.Absolute, out Uri? uri))
-            return uri.Host.TrimStart('.').TrimEnd('.');
-
-        return raw.TrimStart('.').TrimEnd('.');
     }
 }

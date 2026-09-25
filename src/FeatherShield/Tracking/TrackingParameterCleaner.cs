@@ -1,13 +1,12 @@
 namespace FeatherShield.Tracking;
 
-public static class TrackingParameterCleaner
+internal static class TrackingParameterCleaner
 {
-    public static string Clean(string address, IReadOnlySet<string> trackingParameters)
+    public static string Clean(string address, IReadOnlySet<string> parameters)
     {
-        ArgumentNullException.ThrowIfNull(trackingParameters);
-
         if (!Uri.TryCreate(address, UriKind.Absolute, out Uri? uri) ||
-            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) ||
+            (uri.Scheme != Uri.UriSchemeHttp &&
+             uri.Scheme != Uri.UriSchemeHttps) ||
             string.IsNullOrEmpty(uri.Query))
         {
             return address;
@@ -21,10 +20,20 @@ public static class TrackingParameterCleaner
         {
             int equals = part.IndexOf('=');
             string rawName = equals >= 0 ? part[..equals] : part;
-            string name = TryDecodeName(rawName);
 
-            bool tracking = name.StartsWith("utm_", StringComparison.OrdinalIgnoreCase) ||
-                            trackingParameters.Contains(name);
+            string name;
+            try
+            {
+                name = Uri.UnescapeDataString(rawName.Replace('+', ' '));
+            }
+            catch (UriFormatException)
+            {
+                name = rawName;
+            }
+
+            bool tracking =
+                name.StartsWith("utm_", StringComparison.OrdinalIgnoreCase) ||
+                parameters.Contains(name);
 
             if (tracking)
                 changed = true;
@@ -35,23 +44,9 @@ public static class TrackingParameterCleaner
         if (!changed)
             return address;
 
-        var builder = new UriBuilder(uri)
+        return new UriBuilder(uri)
         {
-            Query = string.Join('&', kept)
-        };
-
-        return builder.Uri.AbsoluteUri;
-    }
-
-    private static string TryDecodeName(string value)
-    {
-        try
-        {
-            return Uri.UnescapeDataString(value.Replace('+', ' '));
-        }
-        catch (UriFormatException)
-        {
-            return value;
-        }
+            Query = string.Join("&", kept)
+        }.Uri.AbsoluteUri;
     }
 }

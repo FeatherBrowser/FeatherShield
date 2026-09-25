@@ -8,14 +8,29 @@ public static class FilterListLoader
 
         var rules = new RuleSet();
 
-        LoadDomains(Path.Combine(root, "filters", "network-domains.txt"), rules.BlockedDomains);
-        LoadDomains(Path.Combine(root, "exceptions", "network-domains.txt"), rules.ExceptionDomains);
-        LoadValues(Path.Combine(root, "filters", "tracking-tokens.txt"), rules.TrackingTokens);
-        LoadValues(Path.Combine(root, "tracking-parameters.txt"), rules.TrackingParameters);
+        LoadLegacyValues(
+            Path.Combine(root, "filters", "tracking-tokens.txt"),
+            rules.AddTrackingToken);
+
+        LoadLegacyValues(
+            Path.Combine(root, "tracking-parameters.txt"),
+            value => rules.AddTrackingParameter(value));
+
+        LoadLegacyDomains(
+            Path.Combine(root, "filters", "network-domains.txt"),
+            rules,
+            exception: false);
+
+        LoadLegacyDomains(
+            Path.Combine(root, "exceptions", "network-domains.txt"),
+            rules,
+            exception: true);
+
+        LoadRuleDirectory(Path.Combine(root, "subscriptions"), rules);
+        LoadRuleDirectory(Path.Combine(root, "rules"), rules);
 
         string customRules = Path.Combine(root, "filters", "custom-rules.txt");
-        if (File.Exists(customRules))
-            FilterParser.AddRules(rules, ReadValues(customRules));
+        LoadRulesFile(customRules, rules);
 
         return rules;
     }
@@ -23,39 +38,71 @@ public static class FilterListLoader
     public static void LoadRulesFile(string path, RuleSet rules)
     {
         ArgumentNullException.ThrowIfNull(rules);
+
         if (!File.Exists(path))
             return;
 
-        FilterParser.AddRules(rules, ReadValues(path));
+        FilterParser.AddRules(rules, File.ReadLines(path));
     }
 
-    private static void LoadDomains(string path, HashSet<string> target)
+    private static void LoadRuleDirectory(string path, RuleSet rules)
+    {
+        if (!Directory.Exists(path))
+            return;
+
+        foreach (string file in Directory.EnumerateFiles(
+                     path,
+                     "*.txt",
+                     SearchOption.AllDirectories))
+        {
+            LoadRulesFile(file, rules);
+        }
+    }
+
+    private static void LoadLegacyDomains(
+        string path,
+        RuleSet rules,
+        bool exception)
     {
         if (!File.Exists(path))
             return;
 
-        foreach (string value in ReadValues(path))
-            target.Add(value.Trim().TrimStart('.').TrimEnd('.'));
-    }
-
-    private static void LoadValues(string path, ICollection<string> target)
-    {
-        if (!File.Exists(path))
-            return;
-
-        foreach (string value in ReadValues(path))
-            target.Add(value);
-    }
-
-    private static IEnumerable<string> ReadValues(string path)
-    {
         foreach (string raw in File.ReadLines(path))
         {
             string value = raw.Trim();
-            if (value.Length == 0 || value.StartsWith('#') || value.StartsWith('!'))
-                continue;
 
-            yield return value;
+            if (value.Length == 0 ||
+                value.StartsWith('#') ||
+                value.StartsWith('!'))
+            {
+                continue;
+            }
+
+            FilterParser.AddRule(
+                rules,
+                $"{(exception ? "@@" : string.Empty)}||{value}^");
+        }
+    }
+
+    private static void LoadLegacyValues(
+        string path,
+        Action<string> add)
+    {
+        if (!File.Exists(path))
+            return;
+
+        foreach (string raw in File.ReadLines(path))
+        {
+            string value = raw.Trim();
+
+            if (value.Length == 0 ||
+                value.StartsWith('#') ||
+                value.StartsWith('!'))
+            {
+                continue;
+            }
+
+            add(value);
         }
     }
 }

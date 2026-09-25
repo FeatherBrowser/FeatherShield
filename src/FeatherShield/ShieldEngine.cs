@@ -1,18 +1,21 @@
+using FeatherShield.Cosmetic;
 using FeatherShield.Matching;
+using FeatherShield.Rules;
 using FeatherShield.Tracking;
 
 namespace FeatherShield;
 
 public sealed class ShieldEngine
 {
-    private static readonly HashSet<ResourceType> StrictTrackerResourceTypes =
+    private static readonly HashSet<ResourceType> TrackerResourceTypes =
     [
         ResourceType.Script,
         ResourceType.Image,
         ResourceType.XmlHttpRequest,
         ResourceType.Fetch,
         ResourceType.Ping,
-        ResourceType.Media
+        ResourceType.Media,
+        ResourceType.WebSocket
     ];
 
     public ShieldEngine(RuleSet? rules = null)
@@ -22,7 +25,9 @@ public sealed class ShieldEngine
 
     public RuleSet Rules { get; }
 
-    public BlockDecision Evaluate(ResourceRequest request, ShieldOptions? options = null)
+    public BlockDecision Evaluate(
+        ResourceRequest request,
+        ShieldOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         options ??= new ShieldOptions();
@@ -33,70 +38,103 @@ public sealed class ShieldEngine
         string documentHost = request.DocumentUrl?.Host ?? string.Empty;
 
         if (IsAllowlisted(documentHost, options.AllowlistedSites))
-            return BlockDecision.Allow(BlockReason.Allowlisted, documentHost);
+        {
+            return BlockDecision.Allow(
+                BlockReason.Allowlisted,
+                documentHost);
+        }
 
-        string? exception = MatchException(request.Url);
+        NetworkRule? exception = Rules
+            .ExceptionCandidates(request.Url.Host)
+            .FirstOrDefault(rule => rule.Matches(request));
+
         if (exception is not null)
-            return BlockDecision.Allow(BlockReason.ExceptionRule, exception);
+        {
+            return BlockDecision.Allow(
+                BlockReason.ExceptionRule,
+                exception.Source);
+        }
 
-        string? domain = MatchBlockedDomain(request.Url.Host);
-        if (domain is not null)
-            return BlockDecision.Block(BlockReason.BlockedDomain, domain);
+        NetworkRule? block = Rules
+            .BlockingCandidates(request.Url.Host)
+            .OrderByDescending(rule => rule.Options.Important)
+            .FirstOrDefault(rule => rule.Matches(request));
 
-        string? urlRule = Rules.UrlRules.FirstOrDefault(rule => rule.IsMatch(request.Url.AbsoluteUri))?.Pattern;
-        if (urlRule is not null)
-            return BlockDecision.Block(BlockReason.UrlRule, urlRule);
+        if (block is not null)
+        {
+            return BlockDecision.Block(
+                BlockReason.NetworkRule,
+                block.Source);
+        }
 
-        if (!options.StrictBlocking || request.Type == ResourceType.Document)
+        if (!options.StrictBlocking ||
+            request.Type == ResourceType.Document)
+        {
             return BlockDecision.Allow();
+        }
 
-        bool thirdParty = documentHost.Length > 0 &&
-                          !HostMatcher.Related(request.Url.Host, documentHost);
+        bool thirdParty = DomainMatcher.IsThirdParty(
+            request.Url.Host,
+            documentHost);
+
         if (!thirdParty)
             return BlockDecision.Allow();
 
-        string? trackerToken = Rules.TrackingTokens.FirstOrDefault(token =>
-            request.Url.AbsoluteUri.Contains(token, StringComparison.OrdinalIgnoreCase));
+        string? trackerToken = Rules.TrackingTokens.FirstOrDefault(
+            token => request.Url.AbsoluteUri.Contains(
+                token,
+                StringComparison.OrdinalIgnoreCase));
 
         if (trackerToken is null)
             return BlockDecision.Allow();
 
-        if (options.BlockThirdPartyTrackers || StrictTrackerResourceTypes.Contains(request.Type))
-            return BlockDecision.Block(BlockReason.ThirdPartyTracker, trackerToken);
+        if (options.BlockThirdPartyTrackers ||
+            TrackerResourceTypes.Contains(request.Type))
+        {
+            return BlockDecision.Block(
+                BlockReason.ThirdPartyTracker,
+                trackerToken);
+        }
 
         return BlockDecision.Allow();
     }
 
-    public string CleanTopLevelUrl(string address) =>
-        TrackingParameterCleaner.Clean(address, Rules.TrackingParameters);
+    public string GetCosmeticFilterScript(string? pageAddress)
+    {
+        string host = string.Empty;
 
-    public bool IsAllowlisted(string? host, IReadOnlyCollection<string>? allowlist)
+        if (Uri.TryCreate(pageAddress, UriKind.Absolute, out Uri? uri))
+            host = uri.Host;
+
+        return CosmeticFilterBuilder.BuildInjectionScript(Rules, host);
+    }
+
+    public IReadOnlyList<string> GetCosmeticSelectors(string? host) =>
+        CosmeticFilterBuilder.GetSelectors(Rules, host);
+
+    public string CleanTopLevelUrl(string address) =>
+        TrackingParameterCleaner.Clean(
+            address,
+            Rules.TrackingParameters);
+
+    public bool IsAllowlisted(
+        string? host,
+        IReadOnlyCollection<string>? allowlist)
     {
         if (string.IsNullOrWhiteSpace(host) || allowlist is null)
             return false;
 
         return allowlist
-            .Select(HostMatcher.Normalize)
+            .Select(DomainMatcher.Normalize)
             .Where(static value => value.Length > 0)
-            .Any(value => HostMatcher.Matches(host, value));
+            .Any(value => DomainMatcher.Matches(host, value));
     }
-
-    private string? MatchException(Uri request)
-    {
-        string? domain = Rules.ExceptionDomains.FirstOrDefault(rule =>
-            HostMatcher.Matches(request.Host, rule));
-        if (domain is not null)
-            return domain;
-
-        return Rules.ExceptionUrlRules
-            .FirstOrDefault(rule => rule.IsMatch(request.AbsoluteUri))?
-            .Pattern;
-    }
-
-    private string? MatchBlockedDomain(string host) =>
-        Rules.BlockedDomains.FirstOrDefault(domain => HostMatcher.Matches(host, domain));
 
     private static bool IsHttp(Uri uri) =>
-        uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
-        uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+        uri.Scheme.Equals(
+            Uri.UriSchemeHttp,
+            StringComparison.OrdinalIgnoreCase) ||
+        uri.Scheme.Equals(
+            Uri.UriSchemeHttps,
+            StringComparison.OrdinalIgnoreCase);
 }
