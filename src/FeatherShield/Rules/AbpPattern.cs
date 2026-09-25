@@ -9,36 +9,68 @@ internal sealed class AbpPattern
     private readonly Regex? _regex;
     private readonly string? _hostAnchor;
 
-    public AbpPattern(string source, bool matchCase)
+    public AbpPattern(
+        string source,
+        bool matchCase)
     {
-        Source = source;
-        _hostAnchor = ExtractHostAnchor(source);
+        ArgumentException.ThrowIfNullOrWhiteSpace(source);
 
-        string pattern = source;
+        Source = source.Trim();
+
+        _hostAnchor = ExtractHostAnchor(Source);
+
+        string pattern = Source;
 
         if (_hostAnchor is not null)
         {
             pattern = pattern[2..];
-            int boundary = pattern.IndexOfAny(['^', '/', '?', '#']);
-            pattern = boundary >= 0 ? pattern[boundary..] : string.Empty;
+
+            int boundary = pattern.IndexOfAny(
+                ['^', '/', '?', '#', '*']);
+
+            pattern = boundary >= 0
+                ? pattern[boundary..]
+                : string.Empty;
         }
 
-        if (pattern.Length > 1 &&
-            pattern.StartsWith('/') &&
-            pattern.EndsWith('/'))
+        RegexOptions options =
+            RegexOptions.Compiled |
+            RegexOptions.CultureInvariant;
+
+        if (!matchCase)
+            options |= RegexOptions.IgnoreCase;
+
+        if (IsRegexRule(pattern))
         {
-            _regex = new Regex(
-                pattern[1..^1],
-                RegexOptions.Compiled |
-                (matchCase ? RegexOptions.None : RegexOptions.IgnoreCase),
-                TimeSpan.FromMilliseconds(100));
+            string regexPattern = pattern[1..^1];
+
+            try
+            {
+                _regex = new Regex(
+                    regexPattern,
+                    options,
+                    TimeSpan.FromMilliseconds(100));
+            }
+            catch (RegexParseException)
+            {
+                _regex = null;
+            }
+
             return;
         }
 
-        if (pattern.Length > 0)
-        {
-            _regex = BuildRegex(pattern, matchCase);
-        }
+        if (pattern.Length == 0)
+            return;
+
+        string converted = ConvertAbpPattern(pattern);
+
+        if (converted.Length == 0)
+            return;
+
+        _regex = new Regex(
+            converted,
+            options,
+            TimeSpan.FromMilliseconds(100));
     }
 
     public string Source { get; }
@@ -47,70 +79,117 @@ internal sealed class AbpPattern
 
     public bool IsMatch(Uri uri)
     {
+        ArgumentNullException.ThrowIfNull(uri);
+
         if (_hostAnchor is not null &&
-            !DomainMatcher.Matches(uri.Host, _hostAnchor))
+            !DomainMatcher.Matches(
+                uri.Host,
+                _hostAnchor))
         {
             return false;
         }
 
-        return _regex is null || _regex.IsMatch(uri.AbsoluteUri);
+        return _regex is null ||
+               _regex.IsMatch(uri.AbsoluteUri);
     }
 
-    private static string? ExtractHostAnchor(string pattern)
+    private static bool IsRegexRule(
+        string pattern)
     {
-        if (!pattern.StartsWith("||", StringComparison.Ordinal))
-            return null;
+        if (pattern.Length < 2)
+            return false;
 
-        string value = pattern[2..];
-        int boundary = value.IndexOfAny(['^', '/', '?', '#', '*']);
-        string host = (boundary >= 0 ? value[..boundary] : value)
-            .Trim()
-            .TrimStart('.')
-            .TrimEnd('.');
-
-        return host.Contains('.') ? host : null;
-    }
-
-    private static Regex BuildRegex(string pattern, bool matchCase)
-    {
-        bool anchorStart = pattern.StartsWith('|');
-        bool anchorEnd = pattern.EndsWith('|');
-
-        if (anchorStart)
-            pattern = pattern[1..];
-
-        if (anchorEnd && pattern.Length > 0)
-            pattern = pattern[..^1];
-
-        var regex = new StringBuilder();
-
-        if (anchorStart)
-            regex.Append('^');
-
-        foreach (char c in pattern)
+        if (pattern[0] != '/' ||
+            pattern[^1] != '/')
         {
-            switch (c)
+            return false;
+        }
+
+        return true;
+    }
+
+    private static string ConvertAbpPattern(
+        string pattern)
+    {
+        bool anchorStart = false;
+        bool anchorEnd = false;
+
+        if (pattern.StartsWith('|') &&
+            !pattern.StartsWith("||", StringComparison.Ordinal))
+        {
+            anchorStart = true;
+            pattern = pattern[1..];
+        }
+
+        if (pattern.EndsWith('|') &&
+            pattern.Length > 0)
+        {
+            anchorEnd = true;
+            pattern = pattern[..^1];
+        }
+
+        var builder = new StringBuilder(
+            pattern.Length * 2);
+
+        if (anchorStart)
+            builder.Append('^');
+
+        foreach (char character in pattern)
+        {
+            switch (character)
             {
                 case '*':
-                    regex.Append(".*");
+                    builder.Append(".*");
                     break;
+
                 case '^':
-                    regex.Append("(?:[^A-Za-z0-9_\\-.%]|$)");
+                    builder.Append(
+                        "(?:[^A-Za-z0-9_\\-.%]|$)");
                     break;
+
                 default:
-                    regex.Append(Regex.Escape(c.ToString()));
+                    builder.Append(
+                        Regex.Escape(
+                            character.ToString()));
                     break;
             }
         }
 
         if (anchorEnd)
-            regex.Append('$');
+            builder.Append('$');
 
-        return new Regex(
-            regex.ToString(),
-            RegexOptions.Compiled |
-            RegexOptions.CultureInvariant |
-            (matchCase ? RegexOptions.None : RegexOptions.IgnoreCase),
-            TimeSpan.FromMilliseconds(100));
+        return builder.ToString();
+    }
+
+    private static string? ExtractHostAnchor(
+        string pattern)
+    {
+        if (!pattern.StartsWith(
+                "||",
+                StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        string value = pattern[2..];
+
+        int boundary = value.IndexOfAny(
+            ['^', '/', '?', '#', '*', '|']);
+
+        string host = (
+                boundary >= 0
+                    ? value[..boundary]
+                    : value)
+            .Trim()
+            .TrimStart('.')
+            .TrimEnd('.');
+
+        if (host.Length == 0 ||
+            !host.Contains('.'))
+        {
+            return null;
+        }
+
+        return DomainMatcher.Normalize(host);
     }
 }
