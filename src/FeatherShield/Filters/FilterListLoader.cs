@@ -1,5 +1,7 @@
 namespace FeatherShield.Filters;
 
+using FeatherShield.Rules;
+
 public static class FilterListLoader
 {
     public static RuleSet LoadDirectory(string root)
