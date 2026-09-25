@@ -10,6 +10,5 @@ internal sealed class NetworkRule
     public string? HostAnchor => Pattern.HostAnchor;
 
     public bool Matches(ResourceRequest request) =>
-        Options.Matches(request) &&
-        Pattern.IsMatch(request.Url);
+        Options.Matches(request) && Pattern.IsMatch(request.Url);
 }

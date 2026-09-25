@@ -4,23 +4,26 @@ namespace FeatherShield.Rules;
 
 internal sealed class CosmeticRule
 {
-    public required string Selector { get; init; }
-    public required bool IsException { get; init; }
+    public CosmeticRule(string selector, string[]? excludedDomains)
+    {
+        Selector = selector;
+        ExcludedDomains = excludedDomains;
+    }
 
-    public HashSet<string> IncludedDomains { get; } =
-        new(StringComparer.OrdinalIgnoreCase);
-
-    public HashSet<string> ExcludedDomains { get; } =
-        new(StringComparer.OrdinalIgnoreCase);
+    public string Selector { get; }
+    public string[]? ExcludedDomains { get; }
 
     public bool AppliesTo(string host)
     {
-        if (IncludedDomains.Count > 0 &&
-            !IncludedDomains.Any(domain => DomainMatcher.Matches(host, domain)))
+        if (ExcludedDomains is not { Length: > 0 })
+            return true;
+
+        for (int i = 0; i < ExcludedDomains.Length; i++)
         {
-            return false;
+            if (DomainMatcher.MatchesNormalized(host, ExcludedDomains[i]))
+                return false;
         }
 
-        return !ExcludedDomains.Any(domain => DomainMatcher.Matches(host, domain));
+        return true;
     }
 }

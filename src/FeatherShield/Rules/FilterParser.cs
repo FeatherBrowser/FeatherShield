@@ -1,3 +1,4 @@
+using FeatherShield.Matching;
 using FeatherShield.Rules;
 
 namespace FeatherShield;
@@ -16,9 +17,15 @@ public static class FilterParser
             ["media"] = ResourceType.Media,
             ["xmlhttprequest"] = ResourceType.XmlHttpRequest,
             ["xhr"] = ResourceType.XmlHttpRequest,
+            ["fetch"] = ResourceType.Fetch,
             ["ping"] = ResourceType.Ping,
+            ["beacon"] = ResourceType.Ping,
             ["websocket"] = ResourceType.WebSocket,
             ["object"] = ResourceType.Object,
+            ["object-subrequest"] = ResourceType.Object,
+            ["frame"] = ResourceType.Subdocument,
+            ["css"] = ResourceType.Stylesheet,
+            ["doc"] = ResourceType.Document,
             ["other"] = ResourceType.Other
         };
 
@@ -27,37 +34,39 @@ public static class FilterParser
         ArgumentNullException.ThrowIfNull(rules);
 
         string line = raw?.Trim() ?? string.Empty;
-
-        if (line.Length == 0 ||
-            line.StartsWith('!') ||
-            line.StartsWith('['))
-        {
-            return;
-        }
-
-        if (TryAddCosmeticRule(rules, line))
+        if (line.Length == 0 || line.StartsWith('!') || line.StartsWith('['))
             return;
 
         if (line.StartsWith("0.0.0.0 ", StringComparison.Ordinal) ||
             line.StartsWith("127.0.0.1 ", StringComparison.Ordinal))
         {
-            string[] parts = line.Split(
-                ' ',
-                StringSplitOptions.RemoveEmptyEntries |
-                StringSplitOptions.TrimEntries);
+            int separator = line.IndexOf(' ');
+            string domain = line[(separator + 1)..].Trim();
+            int nextSpace = domain.IndexOfAny([' ', '\t']);
+            if (nextSpace >= 0)
+                domain = domain[..nextSpace];
 
-            if (parts.Length >= 2)
-                line = $"||{parts[1]}^";
+            if (domain.Length == 0 || domain == "localhost" || domain == "localhost.localdomain")
+                return;
+
+            line = $"||{domain}^";
         }
 
-        bool exception = line.StartsWith("@@", StringComparison.Ordinal);
+        if (IsUnsupportedCosmeticSyntax(line))
+            return;
 
+        if (!rules.TryRegisterRule(line))
+            return;
+
+        if (TryAddCosmeticRule(rules, line))
+            return;
+
+        bool exception = line.StartsWith("@@", StringComparison.Ordinal);
         if (exception)
             line = line[2..];
 
         string pattern = line;
         string? optionsText = null;
-
         int optionIndex = FindOptionsSeparator(line);
 
         if (optionIndex >= 0)
@@ -66,23 +75,23 @@ public static class FilterParser
             optionsText = line[(optionIndex + 1)..];
         }
 
-        RuleOptions options = ParseOptions(optionsText);
+        RuleOptions options = ParseOptions(
+            optionsText,
+            out bool badFilter,
+            out bool unsupportedModifier);
 
-        if (optionsText is not null &&
-            optionsText.Split(',').Any(option =>
-                option.Equals("badfilter", StringComparison.OrdinalIgnoreCase)))
-        {
+        if (badFilter || unsupportedModifier || string.IsNullOrWhiteSpace(pattern))
             return;
-        }
 
-        if (string.IsNullOrWhiteSpace(pattern))
+        var compiledPattern = new AbpPattern(pattern.Trim(), options.MatchCase);
+        if (!compiledPattern.IsValid)
             return;
 
         var rule = new NetworkRule
         {
-            Source = raw ?? line,
+            Source = raw?.Trim() ?? line,
             IsException = exception,
-            Pattern = new AbpPattern(pattern.Trim(), options.MatchCase),
+            Pattern = compiledPattern,
             Options = options
         };
 
@@ -99,85 +108,134 @@ public static class FilterParser
 
     private static int FindOptionsSeparator(string line)
     {
-        if (line.Length > 2 &&
-            line.StartsWith('/') &&
-            line.LastIndexOf('/') > 0)
+        if (line.Length > 2 && line.StartsWith('/') && line.LastIndexOf('/') > 0)
         {
             int closing = line.LastIndexOf('/');
-            int dollar = line.IndexOf('$', closing + 1);
-            return dollar;
+            return line.IndexOf('$', closing + 1);
         }
 
         return line.IndexOf('$');
     }
 
-    private static RuleOptions ParseOptions(string? text)
+    private static RuleOptions ParseOptions(
+        string? text,
+        out bool badFilter,
+        out bool unsupportedModifier)
     {
-        var options = new RuleOptions();
-
+        badFilter = false;
+        unsupportedModifier = false;
         if (string.IsNullOrWhiteSpace(text))
-            return options;
+            return RuleOptions.Empty;
+
+        ulong includedTypes = 0;
+        ulong excludedTypes = 0;
+        List<string>? includedDomains = null;
+        List<string>? excludedDomains = null;
+        bool? thirdParty = null;
+        bool matchCase = false;
+        bool important = false;
 
         foreach (string raw in text.Split(
                      ',',
-                     StringSplitOptions.RemoveEmptyEntries |
-                     StringSplitOptions.TrimEntries))
+                     StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             bool negated = raw.StartsWith('~');
             string value = negated ? raw[1..] : raw;
 
-            if (ResourceOptions.TryGetValue(value, out ResourceType type))
+            if (value.Equals("badfilter", StringComparison.OrdinalIgnoreCase))
             {
-                (negated ? options.ExcludedTypes : options.IncludedTypes).Add(type);
+                badFilter = true;
                 continue;
             }
 
-            if (value.Equals("third-party", StringComparison.OrdinalIgnoreCase))
+            if (ResourceOptions.TryGetValue(value, out ResourceType type))
             {
-                options.ThirdParty = !negated;
+                ulong mask = 1UL << (int)type;
+                if (negated)
+                    excludedTypes |= mask;
+                else
+                    includedTypes |= mask;
+                continue;
+            }
+
+            if (value.Equals("third-party", StringComparison.OrdinalIgnoreCase) ||
+                value.Equals("3p", StringComparison.OrdinalIgnoreCase))
+            {
+                thirdParty = !negated;
+                continue;
+            }
+
+            if (value.Equals("first-party", StringComparison.OrdinalIgnoreCase) ||
+                value.Equals("1p", StringComparison.OrdinalIgnoreCase))
+            {
+                thirdParty = negated;
                 continue;
             }
 
             if (value.Equals("match-case", StringComparison.OrdinalIgnoreCase))
             {
-                options.MatchCase = !negated;
+                matchCase = !negated;
                 continue;
             }
 
             if (value.Equals("important", StringComparison.OrdinalIgnoreCase))
             {
-                options.Important = !negated;
+                important = !negated;
                 continue;
             }
 
             if (value.StartsWith("domain=", StringComparison.OrdinalIgnoreCase))
             {
-                ParseDomains(value["domain=".Length..], options);
+                ParseDomains(
+                    value["domain=".Length..],
+                    ref includedDomains,
+                    ref excludedDomains);
+                continue;
             }
+
+            if (value.Equals("all", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            unsupportedModifier = true;
         }
 
-        return options;
+        string[]? included = includedDomains?.ToArray();
+        string[]? excluded = excludedDomains?.ToArray();
+
+        return RuleOptions.Create(
+            includedTypes,
+            excludedTypes,
+            included,
+            excluded,
+            thirdParty,
+            matchCase,
+            important);
     }
 
-    private static void ParseDomains(string value, RuleOptions options)
+    private static void ParseDomains(
+        string value,
+        ref List<string>? includedDomains,
+        ref List<string>? excludedDomains)
     {
         foreach (string entry in value.Split(
                      '|',
-                     StringSplitOptions.RemoveEmptyEntries |
-                     StringSplitOptions.TrimEntries))
+                     StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             bool excluded = entry.StartsWith('~');
-            string domain = (excluded ? entry[1..] : entry)
-                .Trim()
-                .TrimStart('.')
-                .TrimEnd('.');
-
+            string domain = DomainMatcher.Normalize(excluded ? entry[1..] : entry);
             if (domain.Length == 0)
                 continue;
 
-            (excluded
-                ? options.ExcludedDomains
-                : options.IncludedDomains).Add(domain);
+            if (excluded)
+            {
+                excludedDomains ??= [];
+                excludedDomains.Add(domain);
+            }
+            else
+            {
+                includedDomains ??= [];
+                includedDomains.Add(domain);
+            }
         }
     }
 
@@ -204,35 +262,60 @@ public static class FilterParser
 
         if (selector.Length == 0 ||
             selector.StartsWith('+') ||
+            selector.StartsWith('^') ||
             selector.Contains(":style(", StringComparison.OrdinalIgnoreCase) ||
-            selector.Contains(":remove(", StringComparison.OrdinalIgnoreCase))
+            selector.Contains(":remove(", StringComparison.OrdinalIgnoreCase) ||
+            selector.Contains(":has-text(", StringComparison.OrdinalIgnoreCase) ||
+            selector.Contains(":matches-css(", StringComparison.OrdinalIgnoreCase) ||
+            selector.Contains(":xpath(", StringComparison.OrdinalIgnoreCase) ||
+            selector.Contains(":upward(", StringComparison.OrdinalIgnoreCase) ||
+            selector.Contains(":remove-attr(", StringComparison.OrdinalIgnoreCase) ||
+            selector.Contains(":remove-class(", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
 
-        var rule = new CosmeticRule
-        {
-            Selector = selector,
-            IsException = exception
-        };
+        List<string>? included = null;
+        List<string>? excluded = null;
 
         if (domains.Length > 0)
         {
             foreach (string entry in domains.Split(
                          ',',
-                         StringSplitOptions.RemoveEmptyEntries |
-                         StringSplitOptions.TrimEntries))
+                         StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
-                bool excluded = entry.StartsWith('~');
-                string domain = excluded ? entry[1..] : entry;
+                bool isExcluded = entry.StartsWith('~');
+                string domain = DomainMatcher.Normalize(isExcluded ? entry[1..] : entry);
+                if (domain.Length == 0)
+                    continue;
 
-                (excluded
-                    ? rule.ExcludedDomains
-                    : rule.IncludedDomains).Add(domain);
+                if (isExcluded)
+                {
+                    excluded ??= [];
+                    excluded.Add(domain);
+                }
+                else
+                {
+                    included ??= [];
+                    included.Add(domain);
+                }
             }
         }
 
-        rules.Add(rule);
+        rules.AddCosmetic(
+            selector,
+            exception,
+            included?.ToArray(),
+            excluded?.ToArray());
+
         return true;
     }
+    private static bool IsUnsupportedCosmeticSyntax(string line) =>
+        line.Contains("#?#", StringComparison.Ordinal) ||
+        line.Contains("#@?#", StringComparison.Ordinal) ||
+        line.Contains("#$#", StringComparison.Ordinal) ||
+        line.Contains("#@$#", StringComparison.Ordinal) ||
+        line.Contains("#%#", StringComparison.Ordinal) ||
+        line.Contains("#@%#", StringComparison.Ordinal);
+
 }

@@ -10,22 +10,7 @@ public static class CosmeticFilterBuilder
         string? host)
     {
         ArgumentNullException.ThrowIfNull(rules);
-
-        host ??= string.Empty;
-
-        HashSet<string> hidden = rules.CosmeticRules
-            .Where(rule => !rule.IsException && rule.AppliesTo(host))
-            .Select(rule => rule.Selector)
-            .ToHashSet(StringComparer.Ordinal);
-
-        HashSet<string> exceptions = rules.CosmeticRules
-            .Where(rule => rule.IsException && rule.AppliesTo(host))
-            .Select(rule => rule.Selector)
-            .ToHashSet(StringComparer.Ordinal);
-
-        hidden.ExceptWith(exceptions);
-
-        return hidden.ToArray();
+        return rules.GetCosmeticSelectors(host);
     }
 
     public static string BuildInjectionScript(

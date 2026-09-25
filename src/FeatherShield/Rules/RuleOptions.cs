@@ -4,46 +4,178 @@ namespace FeatherShield.Rules;
 
 internal sealed class RuleOptions
 {
-    public HashSet<ResourceType> IncludedTypes { get; } = [];
-    public HashSet<ResourceType> ExcludedTypes { get; } = [];
-    public HashSet<string> IncludedDomains { get; } =
-        new(StringComparer.OrdinalIgnoreCase);
-    public HashSet<string> ExcludedDomains { get; } =
-        new(StringComparer.OrdinalIgnoreCase);
+    private const int MaxCachedOptionSets = 256;
 
-    public bool? ThirdParty { get; set; }
-    public bool MatchCase { get; set; }
-    public bool Important { get; set; }
+    private static readonly object CacheLock = new();
+    private static readonly Dictionary<ulong, RuleOptions> Cache = [];
+
+    public static readonly RuleOptions Empty = new(
+        includedTypes: 0,
+        excludedTypes: 0,
+        includedDomains: null,
+        excludedDomains: null,
+        thirdParty: null,
+        matchCase: false,
+        important: false);
+
+    private readonly ulong _includedTypes;
+    private readonly ulong _excludedTypes;
+    private readonly string[]? _includedDomains;
+    private readonly string[]? _excludedDomains;
+
+    private RuleOptions(
+        ulong includedTypes,
+        ulong excludedTypes,
+        string[]? includedDomains,
+        string[]? excludedDomains,
+        bool? thirdParty,
+        bool matchCase,
+        bool important)
+    {
+        _includedTypes = includedTypes;
+        _excludedTypes = excludedTypes;
+        _includedDomains = includedDomains;
+        _excludedDomains = excludedDomains;
+        ThirdParty = thirdParty;
+        MatchCase = matchCase;
+        Important = important;
+    }
+
+    public bool? ThirdParty { get; }
+    public bool MatchCase { get; }
+    public bool Important { get; }
+
+    public static RuleOptions Create(
+        ulong includedTypes,
+        ulong excludedTypes,
+        string[]? includedDomains,
+        string[]? excludedDomains,
+        bool? thirdParty,
+        bool matchCase,
+        bool important)
+    {
+        if (includedTypes == 0 &&
+            excludedTypes == 0 &&
+            includedDomains is null &&
+            excludedDomains is null &&
+            thirdParty is null &&
+            !matchCase &&
+            !important)
+        {
+            return Empty;
+        }
+
+        if (includedDomains is not null ||
+            excludedDomains is not null ||
+            includedTypes > ushort.MaxValue ||
+            excludedTypes > ushort.MaxValue)
+        {
+            return new RuleOptions(
+                includedTypes,
+                excludedTypes,
+                includedDomains,
+                excludedDomains,
+                thirdParty,
+                matchCase,
+                important);
+        }
+
+        ulong key = BuildCacheKey(
+            includedTypes,
+            excludedTypes,
+            thirdParty,
+            matchCase,
+            important);
+
+        lock (CacheLock)
+        {
+            if (Cache.TryGetValue(key, out RuleOptions? cached))
+                return cached;
+
+            var options = new RuleOptions(
+                includedTypes,
+                excludedTypes,
+                null,
+                null,
+                thirdParty,
+                matchCase,
+                important);
+
+            if (Cache.Count < MaxCachedOptionSets)
+                Cache[key] = options;
+
+            return options;
+        }
+    }
 
     public bool Matches(ResourceRequest request)
     {
-        if (IncludedTypes.Count > 0 && !IncludedTypes.Contains(request.Type))
+        ulong type = 1UL << (int)request.Type;
+
+        if (_includedTypes != 0 && (_includedTypes & type) == 0)
             return false;
 
-        if (ExcludedTypes.Contains(request.Type))
+        if ((_excludedTypes & type) != 0)
             return false;
 
         string documentHost = request.DocumentUrl?.Host ?? string.Empty;
 
-        if (IncludedDomains.Count > 0 &&
-            !IncludedDomains.Any(domain => DomainMatcher.Matches(documentHost, domain)))
+        if (_includedDomains is { Length: > 0 } &&
+            !MatchesAnyDomain(documentHost, _includedDomains))
         {
             return false;
         }
 
-        if (ExcludedDomains.Any(domain => DomainMatcher.Matches(documentHost, domain)))
-            return false;
-
-        if (ThirdParty is not null)
+        if (_excludedDomains is { Length: > 0 } &&
+            MatchesAnyDomain(documentHost, _excludedDomains))
         {
-            bool thirdParty = DomainMatcher.IsThirdParty(
-                request.Url.Host,
-                documentHost);
+            return false;
+        }
 
-            if (thirdParty != ThirdParty.Value)
-                return false;
+        if (ThirdParty is bool requiredThirdParty &&
+            DomainMatcher.IsThirdParty(request.Url.Host, documentHost) != requiredThirdParty)
+        {
+            return false;
         }
 
         return true;
+    }
+
+    private static ulong BuildCacheKey(
+        ulong includedTypes,
+        ulong excludedTypes,
+        bool? thirdParty,
+        bool matchCase,
+        bool important)
+    {
+        ulong party = thirdParty switch
+        {
+            false => 1UL,
+            true => 2UL,
+            _ => 0UL
+        };
+
+        ulong key = includedTypes;
+        key |= excludedTypes << 16;
+        key |= party << 32;
+
+        if (matchCase)
+            key |= 1UL << 34;
+
+        if (important)
+            key |= 1UL << 35;
+
+        return key;
+    }
+
+    private static bool MatchesAnyDomain(string host, string[] domains)
+    {
+        for (int i = 0; i < domains.Length; i++)
+        {
+            if (DomainMatcher.MatchesNormalized(host, domains[i]))
+                return true;
+        }
+
+        return false;
     }
 }

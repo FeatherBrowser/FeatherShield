@@ -7,16 +7,7 @@ namespace FeatherShield;
 
 public sealed class ShieldEngine
 {
-    private static readonly HashSet<ResourceType> TrackerResourceTypes =
-    [
-        ResourceType.Script,
-        ResourceType.Image,
-        ResourceType.XmlHttpRequest,
-        ResourceType.Fetch,
-        ResourceType.Ping,
-        ResourceType.Media,
-        ResourceType.WebSocket
-    ];
+    private static readonly ShieldOptions DefaultOptions = new();
 
     public ShieldEngine(RuleSet? rules = null)
     {
@@ -30,7 +21,7 @@ public sealed class ShieldEngine
         ShieldOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(request);
-        options ??= new ShieldOptions();
+        options ??= DefaultOptions;
 
         if (!options.Enabled || !IsHttp(request.Url))
             return BlockDecision.Allow();
@@ -44,21 +35,21 @@ public sealed class ShieldEngine
                 documentHost);
         }
 
-        NetworkRule? exception = Rules
-            .ExceptionCandidates(request.Url.Host)
-            .FirstOrDefault(rule => rule.Matches(request));
+        NetworkRule? block = Rules.FindBlockingMatch(request);
+        if (block is not null && block.Options.Important)
+        {
+            return BlockDecision.Block(
+                BlockReason.NetworkRule,
+                block.Source);
+        }
 
+        NetworkRule? exception = Rules.FindExceptionMatch(request);
         if (exception is not null)
         {
             return BlockDecision.Allow(
                 BlockReason.ExceptionRule,
                 exception.Source);
         }
-
-        NetworkRule? block = Rules
-            .BlockingCandidates(request.Url.Host)
-            .OrderByDescending(rule => rule.Options.Important)
-            .FirstOrDefault(rule => rule.Matches(request));
 
         if (block is not null)
         {
@@ -67,29 +58,17 @@ public sealed class ShieldEngine
                 block.Source);
         }
 
-        if (!options.StrictBlocking ||
-            request.Type == ResourceType.Document)
-        {
-            return BlockDecision.Allow();
-        }
-
-        bool thirdParty = DomainMatcher.IsThirdParty(
-            request.Url.Host,
-            documentHost);
-
-        if (!thirdParty)
+        if (!options.StrictBlocking || request.Type == ResourceType.Document)
             return BlockDecision.Allow();
 
-        string? trackerToken = Rules.TrackingTokens.FirstOrDefault(
-            token => request.Url.AbsoluteUri.Contains(
-                token,
-                StringComparison.OrdinalIgnoreCase));
+        if (!DomainMatcher.IsThirdParty(request.Url.Host, documentHost))
+            return BlockDecision.Allow();
 
+        string? trackerToken = Rules.FindTrackingToken(request.Url.AbsoluteUri);
         if (trackerToken is null)
             return BlockDecision.Allow();
 
-        if (options.BlockThirdPartyTrackers ||
-            TrackerResourceTypes.Contains(request.Type))
+        if (options.BlockThirdPartyTrackers || IsTrackerResourceType(request.Type))
         {
             return BlockDecision.Block(
                 BlockReason.ThirdPartyTracker,
@@ -113,28 +92,38 @@ public sealed class ShieldEngine
         CosmeticFilterBuilder.GetSelectors(Rules, host);
 
     public string CleanTopLevelUrl(string address) =>
-        TrackingParameterCleaner.Clean(
-            address,
-            Rules.TrackingParameters);
+        TrackingParameterCleaner.Clean(address, Rules.TrackingParameters);
 
     public bool IsAllowlisted(
         string? host,
         IReadOnlyCollection<string>? allowlist)
     {
-        if (string.IsNullOrWhiteSpace(host) || allowlist is null)
+        if (string.IsNullOrWhiteSpace(host) || allowlist is null || allowlist.Count == 0)
             return false;
 
-        return allowlist
-            .Select(DomainMatcher.Normalize)
-            .Where(static value => value.Length > 0)
-            .Any(value => DomainMatcher.Matches(host, value));
+        foreach (string value in allowlist)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                continue;
+
+            string domain = DomainMatcher.Normalize(value);
+            if (domain.Length > 0 && DomainMatcher.MatchesNormalized(host, domain))
+                return true;
+        }
+
+        return false;
     }
 
+    private static bool IsTrackerResourceType(ResourceType type) =>
+        type is ResourceType.Script or
+            ResourceType.Image or
+            ResourceType.XmlHttpRequest or
+            ResourceType.Fetch or
+            ResourceType.Ping or
+            ResourceType.Media or
+            ResourceType.WebSocket;
+
     private static bool IsHttp(Uri uri) =>
-        uri.Scheme.Equals(
-            Uri.UriSchemeHttp,
-            StringComparison.OrdinalIgnoreCase) ||
-        uri.Scheme.Equals(
-            Uri.UriSchemeHttps,
-            StringComparison.OrdinalIgnoreCase);
+        uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+        uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
 }

@@ -34,6 +34,7 @@ public static class FilterListLoader
         string customRules = Path.Combine(root, "filters", "custom-rules.txt");
         LoadRulesFile(customRules, rules);
 
+        rules.Optimize();
         return rules;
     }
 

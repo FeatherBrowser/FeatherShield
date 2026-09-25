@@ -7,43 +7,33 @@ internal static class DomainMatcher
         if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(domain))
             return false;
 
-        host = Normalize(host);
-        domain = Normalize(domain);
+        string normalizedDomain = Normalize(domain);
+        return normalizedDomain.Length > 0 && MatchesNormalized(host, normalizedDomain);
+    }
 
-        return host.Equals(domain, StringComparison.OrdinalIgnoreCase) ||
-               host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase);
+    public static bool MatchesNormalized(string host, string normalizedDomain)
+    {
+        if (host.Length == 0 || normalizedDomain.Length == 0)
+            return false;
+
+        if (host.Equals(normalizedDomain, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        int difference = host.Length - normalizedDomain.Length;
+        return difference > 1 &&
+               host[difference - 1] == '.' &&
+               host.AsSpan(difference).Equals(
+                   normalizedDomain.AsSpan(),
+                   StringComparison.OrdinalIgnoreCase);
     }
 
     public static bool IsThirdParty(string requestHost, string documentHost)
     {
-        if (string.IsNullOrWhiteSpace(requestHost) ||
-            string.IsNullOrWhiteSpace(documentHost))
-        {
+        if (requestHost.Length == 0 || documentHost.Length == 0)
             return false;
-        }
 
-        requestHost = Normalize(requestHost);
-        documentHost = Normalize(documentHost);
-
-        return !Matches(requestHost, documentHost) &&
-               !Matches(documentHost, requestHost);
-    }
-
-    public static IEnumerable<string> EnumerateSuffixes(string host)
-    {
-        host = Normalize(host);
-        if (host.Length == 0)
-            yield break;
-
-        yield return host;
-
-        int offset = 0;
-        while ((offset = host.IndexOf('.', offset)) >= 0)
-        {
-            offset++;
-            if (offset < host.Length)
-                yield return host[offset..];
-        }
+        return !MatchesNormalized(requestHost, documentHost) &&
+               !MatchesNormalized(documentHost, requestHost);
     }
 
     public static string Normalize(string value)
@@ -51,7 +41,7 @@ internal static class DomainMatcher
         string raw = value.Trim();
 
         if (Uri.TryCreate(raw, UriKind.Absolute, out Uri? uri))
-            return uri.Host.TrimStart('.').TrimEnd('.').ToLowerInvariant();
+            raw = uri.Host;
 
         return raw
             .TrimStart('*', '.')
