@@ -30,6 +30,28 @@ public sealed class AntiAdblockTests
         Assert.Equal("application/javascript", stub.MimeType);
     }
 
+    [Theory]
+    [InlineData("nooptext:-1", "noop.txt")]
+    [InlineData("noopjs:10", "noop.js")]
+    [InlineData("1x1.gif", "1x1.gif")]
+    public void RedirectNamesIgnorePrioritySuffixes(string name, string expected)
+    {
+        Assert.Equal(expected, RedirectResources.Normalize(name));
+    }
+
+    [Fact]
+    public void ExceptionForUnknownRedirectDoesNotCancelOtherRedirects()
+    {
+        ShieldEngine engine = Engine(
+            "/ads.js$script,redirect=noop.js",
+            "@@/ads.js$script,redirect=some-unknown-resource.js");
+
+        BlockDecision decision = Script(engine, "https://news.example.com/js/ads.js");
+
+        Assert.True(decision.IsBlocked);
+        Assert.Equal("noop.js", decision.Redirect);
+    }
+
     [Fact]
     public void RedirectRuleOnlyAppliesWhenSomethingElseBlocks()
     {

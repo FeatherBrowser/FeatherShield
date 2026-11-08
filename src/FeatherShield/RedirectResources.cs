@@ -27,7 +27,6 @@ public static class RedirectResources
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
             "2x2-transparent.png", "1x1.png", "1x1-transparent.png", "3x2.png", "32x32.png", "blank-png");
 
-        // Empty media bodies: players report "no ad" instead of retrying or flagging a blocker.
         AddText("noop-0.1s.mp3", "audio/mpeg", "", "noopmp3-0.1s", "blank-mp3");
         AddText("noop-1s.mp4", "video/mp4", "", "noopmp4-1s", "blank-mp4", "mp4");
 
@@ -70,8 +69,14 @@ public static class RedirectResources
             value = value["abp-resource:".Length..];
 
         int colon = value.LastIndexOf(':');
-        if (colon > 0 && colon < value.Length - 1 && value.AsSpan(colon + 1).IndexOfAnyExceptInRange('0', '9') < 0)
-            value = value[..colon];
+        if (colon > 0 && colon < value.Length - 1)
+        {
+            ReadOnlySpan<char> priority = value.AsSpan(colon + 1);
+            if (priority[0] == '-')
+                priority = priority[1..];
+            if (priority.Length > 0 && priority.IndexOfAnyExceptInRange('0', '9') < 0)
+                value = value[..colon];
+        }
 
         if (value.Equals(None, StringComparison.OrdinalIgnoreCase))
             return None;

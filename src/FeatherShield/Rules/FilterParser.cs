@@ -107,7 +107,7 @@ public static class FilterParser
                 IsException = true,
                 Pattern = compiledPattern,
                 Options = options,
-                Redirect = resource ?? RedirectResources.None
+                Redirect = resource ?? redirect.Trim().ToLowerInvariant()
             });
             return;
         }
