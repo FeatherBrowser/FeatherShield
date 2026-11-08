@@ -41,6 +41,8 @@ internal sealed class RuleOptions
         Important = important;
     }
 
+    internal string[]? IncludedDomains => _includedDomains;
+
     public bool? ThirdParty { get; }
     public bool MatchCase { get; }
     public bool Important { get; }

@@ -12,6 +12,9 @@ internal sealed class RuleIndex
 
     private readonly List<NetworkRule> _fallback = [];
 
+    private readonly Dictionary<string, List<NetworkRule>> _byDocumentDomain = new(StringComparer.OrdinalIgnoreCase);
+    private bool _hasEntityDocumentDomains;
+
     public int Count { get; private set; }
 
     public void Add(NetworkRule rule)
@@ -27,6 +30,20 @@ internal sealed class RuleIndex
         if (rule.Pattern.TryGetIndexKey(out ulong key))
         {
             AddKeyRule(key, rule);
+            return;
+        }
+
+        if (rule.Options.IncludedDomains is { Length: > 0 } domains)
+        {
+            foreach (string domain in domains)
+            {
+                if (!_byDocumentDomain.TryGetValue(domain, out List<NetworkRule>? bucket))
+                    _byDocumentDomain[domain] = bucket = [];
+
+                bucket.Add(rule);
+                _hasEntityDocumentDomains |= domain.EndsWith(".*", StringComparison.Ordinal);
+            }
+
             return;
         }
 
@@ -46,14 +63,73 @@ internal sealed class RuleIndex
         if (TryScanList(_fallback, request, preferImportant, ref firstNormal, out match))
             return match;
 
+        if (_byDocumentDomain.Count > 0 &&
+            TryScanDocumentDomainRules(request, preferImportant, ref firstNormal, out match))
+        {
+            return match;
+        }
+
         return firstNormal;
+    }
+
+    private bool TryScanDocumentDomainRules(
+        ResourceRequest request,
+        bool preferImportant,
+        ref NetworkRule? firstNormal,
+        out NetworkRule? match)
+    {
+        string documentHost = request.DocumentUrl?.Host ?? string.Empty;
+        if (documentHost.Length == 0)
+        {
+            match = null;
+            return false;
+        }
+
+        var lookup = _byDocumentDomain.GetAlternateLookup<ReadOnlySpan<char>>();
+        ReadOnlySpan<char> host = documentHost.AsSpan();
+
+        // news.example.com -> example.com -> com
+        while (true)
+        {
+            if (lookup.TryGetValue(host, out List<NetworkRule>? bucket) &&
+                TryScanList(bucket, request, preferImportant, ref firstNormal, out match))
+            {
+                return true;
+            }
+
+            int dot = host.IndexOf('.');
+            if (dot < 0)
+                break;
+
+            host = host[(dot + 1)..];
+        }
+
+        if (_hasEntityDocumentDomains)
+        {
+            foreach (string entity in DomainMatcher.EntityKeys(documentHost))
+            {
+                if (_byDocumentDomain.TryGetValue(entity, out List<NetworkRule>? bucket) &&
+                    TryScanList(bucket, request, preferImportant, ref firstNormal, out match))
+                {
+                    return true;
+                }
+            }
+        }
+
+        match = null;
+        return false;
     }
 
     public void Compact()
     {
+        RebalanceKeyIndex();
+
         _hostPrimary.TrimExcess();
         _keyPrimary.TrimExcess();
         _fallback.TrimExcess();
+        _byDocumentDomain.TrimExcess();
+        foreach (List<NetworkRule> bucket in _byDocumentDomain.Values)
+            bucket.TrimExcess();
 
         if (_hostOverflow is not null)
         {
@@ -258,6 +334,60 @@ internal sealed class RuleIndex
         hash ^= (ulong)host.Length;
         hash *= prime;
         return hash;
+    }
+
+    private void RebalanceKeyIndex()
+    {
+        var rules = new List<NetworkRule>(_keyPrimary.Count);
+        rules.AddRange(_keyPrimary.Values);
+        if (_keyOverflow is not null)
+        {
+            foreach (List<NetworkRule> bucket in _keyOverflow.Values)
+                rules.AddRange(bucket);
+        }
+
+        if (rules.Count < 2)
+            return;
+
+        var candidates = new ulong[rules.Count][];
+        var frequency = new Dictionary<ulong, int>();
+        var scratch = new List<ulong>();
+
+        for (int i = 0; i < rules.Count; i++)
+        {
+            rules[i].Pattern.CollectIndexKeys(scratch);
+            candidates[i] = scratch.ToArray();
+
+            foreach (ulong key in candidates[i])
+                frequency[key] = frequency.GetValueOrDefault(key) + 1;
+        }
+
+        _keyPrimary.Clear();
+        _keyOverflow = null;
+
+        for (int i = 0; i < rules.Count; i++)
+        {
+            ulong best = 0;
+            int bestCount = int.MaxValue;
+
+            foreach (ulong key in candidates[i])
+            {
+                int count = frequency[key];
+                if (count < bestCount)
+                {
+                    best = key;
+                    bestCount = count;
+                }
+            }
+
+            if (best == 0 && !rules[i].Pattern.TryGetIndexKey(out best))
+            {
+                _fallback.Add(rules[i]);
+                continue;
+            }
+
+            AddKeyRule(best, rules[i]);
+        }
     }
 
     private void AddKeyRule(ulong key, NetworkRule rule)

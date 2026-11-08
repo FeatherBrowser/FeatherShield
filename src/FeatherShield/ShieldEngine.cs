@@ -1,6 +1,7 @@
 using FeatherShield.Cosmetic;
 using FeatherShield.Matching;
 using FeatherShield.Rules;
+using FeatherShield.Scriptlets;
 using FeatherShield.Tracking;
 
 namespace FeatherShield;
@@ -40,7 +41,8 @@ public sealed class ShieldEngine
         {
             return BlockDecision.Block(
                 BlockReason.NetworkRule,
-                block.Source);
+                block.Source,
+                RedirectFor(request));
         }
 
         NetworkRule? exception = Rules.FindExceptionMatch(request);
@@ -55,7 +57,8 @@ public sealed class ShieldEngine
         {
             return BlockDecision.Block(
                 BlockReason.NetworkRule,
-                block.Source);
+                block.Source,
+                RedirectFor(request));
         }
 
         if (!options.StrictBlocking || request.Type == ResourceType.Document)
@@ -72,11 +75,24 @@ public sealed class ShieldEngine
         {
             return BlockDecision.Block(
                 BlockReason.ThirdPartyTracker,
-                trackerToken);
+                trackerToken,
+                RedirectFor(request));
         }
 
         return BlockDecision.Allow();
     }
+
+    public string? GetScriptletScript(string? frameAddress)
+    {
+        if (!Uri.TryCreate(frameAddress, UriKind.Absolute, out Uri? uri) || !IsHttp(uri))
+            return null;
+
+        IReadOnlyList<ScriptletCall> calls = Rules.GetScriptlets(uri.Host);
+        return calls.Count == 0 ? null : ScriptletLibrary.BuildScript(calls);
+    }
+
+    private string? RedirectFor(ResourceRequest request) =>
+        request.Type == ResourceType.Document ? null : Rules.FindRedirect(request);
 
     public string GetCosmeticFilterScript(string? pageAddress)
     {

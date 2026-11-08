@@ -3,7 +3,8 @@ namespace FeatherShield;
 public readonly record struct BlockDecision(
     bool IsBlocked,
     BlockReason Reason,
-    string? MatchedRule = null)
+    string? MatchedRule = null,
+    string? Redirect = null)
 {
     public static BlockDecision Allow(
         BlockReason reason = BlockReason.None,
@@ -12,6 +13,7 @@ public readonly record struct BlockDecision(
 
     public static BlockDecision Block(
         BlockReason reason,
-        string? rule = null) =>
-        new(true, reason, rule);
+        string? rule = null,
+        string? redirect = null) =>
+        new(true, reason, rule, redirect);
 }

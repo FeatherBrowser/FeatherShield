@@ -8,6 +8,7 @@ internal sealed class AbpPattern
     private const int IndexTokenLength = 5;
 
     private readonly Regex? _regex;
+    private readonly string? _regexLiteral;
     private readonly string _pattern;
     private readonly string? _hostAnchor;
     private readonly bool _anchorStart;
@@ -16,6 +17,10 @@ internal sealed class AbpPattern
     private readonly bool _matchAllAfterHost;
     private readonly bool _hasWildcards;
     private readonly bool _invalidRegex;
+
+    private readonly bool _tailAfterSeparator;
+
+    private readonly string? _leadLiteral;
 
     public AbpPattern(string source, bool matchCase)
     {
@@ -36,13 +41,17 @@ internal sealed class AbpPattern
             }
 
             if (pattern[0] == '^')
+            {
                 pattern = pattern[1..];
+                _tailAfterSeparator = true;
+            }
         }
 
         if (_hostAnchor is null && IsRegexRule(pattern))
         {
             _regex = CreateRegex(pattern[1..^1], matchCase);
             _invalidRegex = _regex is null;
+            _regexLiteral = RequiredLiteral(pattern[1..^1]);
             _pattern = string.Empty;
             return;
         }
@@ -56,7 +65,9 @@ internal sealed class AbpPattern
             pattern = pattern[..^1];
 
         _pattern = pattern;
-        _hasWildcards = pattern.IndexOfAny(['*', '^']) >= 0;
+        int firstWildcard = pattern.IndexOfAny(['*', '^']);
+        _hasWildcards = firstWildcard >= 0;
+        _leadLiteral = firstWildcard > 0 ? pattern[..firstWildcard] : null;
     }
 
     public string? HostAnchor => _hostAnchor;
@@ -80,6 +91,12 @@ internal sealed class AbpPattern
 
         if (_regex is not null)
         {
+            if (_regexLiteral is not null &&
+                !url.Contains(_regexLiteral, _matchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
             try
             {
                 return _regex.IsMatch(url);
@@ -96,6 +113,28 @@ internal sealed class AbpPattern
         StringComparison comparison = _matchCase
             ? StringComparison.Ordinal
             : StringComparison.OrdinalIgnoreCase;
+
+        if (_hostAnchor is not null && TryFindHostEnd(uri, url, out int position))
+        {
+            if (_tailAfterSeparator)
+            {
+                if (position < url.Length && !IsSeparator(url[position]))
+                    return false;
+
+                if (position < url.Length)
+                    position++;
+            }
+
+            if (!_hasWildcards)
+            {
+                ReadOnlySpan<char> rest = url.AsSpan(position);
+                return _anchorEnd
+                    ? rest.Equals(_pattern, comparison)
+                    : rest.StartsWith(_pattern, comparison);
+            }
+
+            return MatchFrom(url, position, comparison, _anchorEnd);
+        }
 
         if (!_hasWildcards)
         {
@@ -114,6 +153,22 @@ internal sealed class AbpPattern
         if (_anchorStart)
             return MatchFrom(url, 0, comparison, _anchorEnd);
 
+        if (_pattern[0] == '*')
+            return MatchFrom(url, 0, comparison, _anchorEnd);
+
+        if (_leadLiteral is not null)
+        {
+            for (int start = url.IndexOf(_leadLiteral, comparison);
+                 start >= 0;
+                 start = start + 1 < url.Length ? url.IndexOf(_leadLiteral, start + 1, comparison) : -1)
+            {
+                if (MatchFrom(url, start, comparison, _anchorEnd))
+                    return true;
+            }
+
+            return false;
+        }
+
         for (int start = 0; start <= url.Length; start++)
         {
             if (MatchFrom(url, start, comparison, _anchorEnd))
@@ -123,14 +178,19 @@ internal sealed class AbpPattern
         return false;
     }
 
+    private string? IndexSource =>
+        _hostAnchor is not null ? null :
+        _regex is not null ? _regexLiteral :
+        _pattern;
+
     public bool TryGetIndexKey(out ulong key)
     {
         key = 0;
 
-        if (_hostAnchor is not null || _regex is not null)
+        if (IndexSource is not string source)
             return false;
 
-        ReadOnlySpan<char> pattern = _pattern.AsSpan();
+        ReadOnlySpan<char> pattern = source.AsSpan();
         int bestStart = -1;
         int bestLength = 0;
         int currentStart = -1;
@@ -164,6 +224,32 @@ internal sealed class AbpPattern
 
         key = PackIndexKey(pattern.Slice(bestStart, IndexTokenLength));
         return key != 0;
+    }
+
+    public void CollectIndexKeys(List<ulong> keys)
+    {
+        keys.Clear();
+
+        if (IndexSource is not string source)
+            return;
+
+        ReadOnlySpan<char> pattern = source.AsSpan();
+        int runStart = 0;
+
+        for (int i = 0; i <= pattern.Length; i++)
+        {
+            if (i < pattern.Length && IsIndexCharacter(pattern[i]))
+                continue;
+
+            for (int start = runStart; start + IndexTokenLength <= i; start++)
+            {
+                ulong key = PackIndexKey(pattern.Slice(start, IndexTokenLength));
+                if (key != 0 && !keys.Contains(key))
+                    keys.Add(key);
+            }
+
+            runStart = i + 1;
+        }
     }
 
     internal static bool TryPackUrlKey(ReadOnlySpan<char> value, out ulong key)
@@ -265,6 +351,35 @@ internal sealed class AbpPattern
         return patternIndex == _pattern.Length && (!requireEnd || valueIndex == value.Length);
     }
 
+    private static bool TryFindHostEnd(Uri uri, string url, out int position)
+    {
+        int start = uri.Scheme.Length + 3;
+        int index = url.IndexOf(uri.Host, start, StringComparison.OrdinalIgnoreCase);
+        int length = uri.Host.Length;
+
+        if (index < 0 && uri.IdnHost is { Length: > 0 } idn)
+        {
+            index = url.IndexOf(idn, start, StringComparison.OrdinalIgnoreCase);
+            length = idn.Length;
+        }
+
+        if (index < 0)
+        {
+            position = 0;
+            return false;
+        }
+
+        position = index + length;
+        if (position < url.Length && url[position] == ':')
+        {
+            position++;
+            while (position < url.Length && char.IsAsciiDigit(url[position]))
+                position++;
+        }
+
+        return true;
+    }
+
     private static bool CharsEqual(char left, char right, StringComparison comparison)
     {
         if (comparison == StringComparison.Ordinal)
@@ -296,6 +411,138 @@ internal sealed class AbpPattern
         }
 
         return key;
+    }
+
+    internal static string? RequiredLiteral(string regex)
+    {
+        int depth = 0;
+        bool inClass = false;
+
+        for (int i = 0; i < regex.Length; i++)
+        {
+            char c = regex[i];
+            if (c == '\\')
+            {
+                i++;
+                continue;
+            }
+
+            if (inClass)
+            {
+                inClass = c != ']';
+                continue;
+            }
+
+            switch (c)
+            {
+                case '[': inClass = true; break;
+                case '(': depth++; break;
+                case ')': depth--; break;
+                case '|' when depth == 0: return null;
+            }
+        }
+
+        string best = string.Empty;
+        var run = new System.Text.StringBuilder();
+
+        void Flush()
+        {
+            if (run.Length > best.Length)
+                best = run.ToString();
+
+            run.Clear();
+        }
+
+        depth = 0;
+        inClass = false;
+
+        for (int i = 0; i < regex.Length; i++)
+        {
+            char c = regex[i];
+
+            if (inClass)
+            {
+                if (c == '\\')
+                    i++;
+                else if (c == ']')
+                    inClass = false;
+
+                continue;
+            }
+
+            if (c == '[')
+            {
+                Flush();
+                inClass = true;
+                continue;
+            }
+
+            if (c == '(')
+            {
+                Flush();
+                depth++;
+                continue;
+            }
+
+            if (c == ')')
+            {
+                Flush();
+                depth--;
+                continue;
+            }
+
+            if (depth > 0)
+            {
+                if (c == '\\')
+                    i++;
+
+                continue;
+            }
+
+            if (c is '?' or '*' or '{')
+            {
+                if (run.Length > 0)
+                    run.Length--;
+
+                Flush();
+
+                if (c == '{')
+                {
+                    int close = regex.IndexOf('}', i);
+                    if (close > i)
+                        i = close;
+                }
+
+                continue;
+            }
+
+            if (c is '+' or '.' or '^' or '$')
+            {
+                Flush();
+                continue;
+            }
+
+            if (c == '\\')
+            {
+                if (i + 1 >= regex.Length)
+                    break;
+
+                char next = regex[++i];
+                if (char.IsLetterOrDigit(next))
+                {
+                    Flush();
+                    continue;
+                }
+
+                run.Append(next);
+                continue;
+            }
+
+            run.Append(c);
+        }
+
+        Flush();
+        return best.Length >= 3 ? best : null;
     }
 
     private static Regex? CreateRegex(string pattern, bool matchCase)

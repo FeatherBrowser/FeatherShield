@@ -13,6 +13,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\FeatherShield\FeatherShield.csproj" />
   </ItemGroup>
 </Project>

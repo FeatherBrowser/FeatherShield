@@ -7,6 +7,8 @@ internal sealed class NetworkRule
     public required AbpPattern Pattern { get; init; }
     public required RuleOptions Options { get; init; }
 
+    public string? Redirect { get; init; }
+
     public string? HostAnchor => Pattern.HostAnchor;
 
     public bool Matches(ResourceRequest request) =>
