@@ -53,6 +53,28 @@ public sealed class AntiAdblockTests
     }
 
     [Fact]
+    public void BlockedImaSdkGetsTheStandInWhileListedSitesKeepTheRealOne()
+    {
+        ShieldEngine engine = Engine(
+            "||imasdk.googleapis.com^",
+            "||imasdk.googleapis.com/js/sdkloader/ima3.js$script,redirect=google-ima.js",
+            "@@||imasdk.googleapis.com/js/sdkloader/ima3.js$domain=bbc.com");
+
+        BlockDecision decision = Script(engine, "https://imasdk.googleapis.com/js/sdkloader/ima3.js");
+        Assert.True(decision.IsBlocked);
+        Assert.Equal("google-ima.js", decision.Redirect);
+        Assert.True(RedirectResources.TryGet("google-ima3", out RedirectResource stub));
+        Assert.Equal("application/javascript", stub.MimeType);
+        Assert.Contains("google.ima=ima", System.Text.Encoding.UTF8.GetString(stub.Body.Span), StringComparison.Ordinal);
+
+        BlockDecision listed = engine.Evaluate(new ResourceRequest(
+            new Uri("https://imasdk.googleapis.com/js/sdkloader/ima3.js"),
+            new Uri("https://www.bbc.com/news"),
+            ResourceType.Script));
+        Assert.False(listed.IsBlocked);
+    }
+
+    [Fact]
     public void RedirectRuleOnlyAppliesWhenSomethingElseBlocks()
     {
         ShieldEngine onlyDirective = Engine(

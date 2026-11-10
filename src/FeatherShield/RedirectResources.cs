@@ -54,6 +54,8 @@ public static class RedirectResources
             "amazon-apstag");
         AddText("scorecardresearch_beacon.js", "application/javascript", ComscoreBeacon,
             "scorecardresearch.com/beacon.js", "scorecardresearch-beacon");
+        AddText("google-ima.js", "application/javascript", GoogleIma,
+            "google-ima3", "imasdk.googleapis.com/js/sdkloader/ima3.js");
     }
 
     public static IReadOnlyCollection<string> Names => Resources.Keys;
@@ -215,6 +217,97 @@ public static class RedirectResources
         (function(){'use strict';
         var noop=function(){};
         window.COMSCORE={beacon:noop,purge:function(){window._comscore=[];}};
+        })();
+        """;
+
+    private const string GoogleIma = """
+        (function(){'use strict';
+        if(window.google&&window.google.ima&&window.google.ima.AdsLoader)return;
+        var noop=function(){};
+        function Listeners(){this.l={};}
+        Listeners.prototype.add=function(t,f,c){if(typeof f!=='function')return;(Array.isArray(t)?t:[t]).forEach(function(x){(this.l[x]=this.l[x]||[]).push({f:f,c:c});},this);};
+        Listeners.prototype.remove=function(t,f){(Array.isArray(t)?t:[t]).forEach(function(x){var a=this.l[x];if(a)this.l[x]=a.filter(function(e){return e.f!==f;});},this);};
+        Listeners.prototype.fire=function(t,ev){(this.l[t]||[]).slice().forEach(function(e){try{e.f.call(e.c||null,ev);}catch(err){setTimeout(function(){throw err;});}});};
+        var ErrorCode={VAST_EMPTY_RESPONSE:1009,VAST_LOAD_TIMEOUT:301,VAST_NO_ADS_AFTER_WRAPPER:303,UNKNOWN_ERROR:900,FAILED_TO_REQUEST_ADS:1005,ADS_REQUEST_NETWORK_ERROR:1012,INVALID_ARGUMENTS:1101,AUTOPLAY_DISALLOWED:1205};
+        function AdError(message,code,type){this.message=message;this.code=code;this.type=type||'adLoadError';}
+        AdError.ErrorCode=ErrorCode;AdError.Type={AD_LOAD:'adLoadError',AD_PLAY:'adPlayError'};
+        AdError.prototype.getErrorCode=function(){return this.code;};
+        AdError.prototype.getVastErrorCode=function(){return 303;};
+        AdError.prototype.getMessage=function(){return this.message;};
+        AdError.prototype.getType=function(){return this.type;};
+        AdError.prototype.getInnerError=function(){return null;};
+        AdError.prototype.getAdId=function(){return '';};
+        AdError.prototype.toString=function(){return 'AdError '+this.code+': '+this.message;};
+        function AdErrorEvent(error,context){this.type='adError';this.error=error;this.context=context;}
+        AdErrorEvent.Type={AD_ERROR:'adError'};
+        AdErrorEvent.prototype.getError=function(){return this.error;};
+        AdErrorEvent.prototype.getUserRequestContext=function(){return this.context===undefined?{}:this.context;};
+        function AdsManagerLoadedEvent(){}
+        AdsManagerLoadedEvent.Type={ADS_MANAGER_LOADED:'adsManagerLoaded'};
+        AdsManagerLoadedEvent.prototype.getAdsManager=function(){return null;};
+        AdsManagerLoadedEvent.prototype.getUserRequestContext=function(){return {};};
+        var adEventTypes={};
+        ['AD_BREAK_READY','AD_BUFFERING','AD_CAN_PLAY','AD_METADATA','AD_PROGRESS','ALL_ADS_COMPLETED','CLICK','COMPLETE','CONTENT_PAUSE_REQUESTED','CONTENT_RESUME_REQUESTED','DURATION_CHANGE','FIRST_QUARTILE','IMPRESSION','INTERACTION','LINEAR_CHANGED','LOADED','LOG','MIDPOINT','PAUSED','RESUMED','SKIPPABLE_STATE_CHANGED','SKIPPED','STARTED','THIRD_QUARTILE','USER_CLOSE','VIDEO_CLICKED','VIDEO_ICON_CLICKED','VOLUME_CHANGED','VOLUME_MUTED'].forEach(function(n){adEventTypes[n]=n.toLowerCase().replace(/_([a-z])/g,function(m,c){return c.toUpperCase();});});
+        function AdEvent(type){this.type=type;}
+        AdEvent.Type=adEventTypes;
+        AdEvent.prototype.getAd=function(){return null;};
+        AdEvent.prototype.getAdData=function(){return {};};
+        function ImaSdkSettings(){this.locale='en';this.redirects=8;this.vpaid=0;this.autoPlay=true;this.cookies=true;this.playerType='';this.playerVersion='';this.ppid='';this.sessionId='';}
+        ImaSdkSettings.VpaidMode={DISABLED:0,ENABLED:1,INSECURE:2};
+        ImaSdkSettings.prototype={constructor:ImaSdkSettings,
+          getLocale:function(){return this.locale;},setLocale:function(v){this.locale=v;},
+          getNumRedirects:function(){return this.redirects;},setNumRedirects:function(v){this.redirects=v;},
+          getVpaidMode:function(){return this.vpaid;},setVpaidMode:function(v){this.vpaid=v;},getVpaidAllowed:function(){return this.vpaid!==0;},setVpaidAllowed:function(v){this.vpaid=v?1:0;},
+          getAutoPlayAdBreaks:function(){return this.autoPlay;},setAutoPlayAdBreaks:function(v){this.autoPlay=v;},
+          getCookiesEnabled:function(){return this.cookies;},setCookiesEnabled:function(v){this.cookies=v;},
+          getPlayerType:function(){return this.playerType;},setPlayerType:function(v){this.playerType=v;},
+          getPlayerVersion:function(){return this.playerVersion;},setPlayerVersion:function(v){this.playerVersion=v;},
+          getPpid:function(){return this.ppid;},setPpid:function(v){this.ppid=v;},
+          getSessionId:function(){return this.sessionId;},setSessionId:function(v){this.sessionId=v;},
+          getDisableCustomPlaybackForIOS10Plus:function(){return false;},setDisableCustomPlaybackForIOS10Plus:noop,
+          getFeatureFlags:function(){return {};},setFeatureFlags:noop,setFeatureFlag:noop,
+          setPageCorrelator:noop,setStreamCorrelator:noop,setCompanionBackfill:noop,setDisableFlashAds:noop,setAutoPlayAdBreaksSetting:noop};
+        var settings=new ImaSdkSettings();
+        function AdDisplayContainer(container,video){this.container=container;this.video=video;}
+        AdDisplayContainer.prototype.initialize=noop;AdDisplayContainer.prototype.destroy=noop;
+        function AdsLoader(){this.listeners=new Listeners();this.destroyed=false;}
+        AdsLoader.prototype.addEventListener=function(t,f,u,c){this.listeners.add(t,f,c);};
+        AdsLoader.prototype.removeEventListener=function(t,f){this.listeners.remove(t,f);};
+        AdsLoader.prototype.getSettings=function(){return settings;};
+        AdsLoader.prototype.getVersion=function(){return ima.VERSION;};
+        AdsLoader.prototype.contentComplete=noop;
+        AdsLoader.prototype.destroy=function(){this.destroyed=true;this.listeners=new Listeners();};
+        AdsLoader.prototype.requestAds=function(request,context){
+          var self=this;
+          setTimeout(function(){
+            if(self.destroyed)return;
+            var error=new AdError('No ads were returned for this request.',ErrorCode.VAST_EMPTY_RESPONSE,'adLoadError');
+            self.listeners.fire('adError',new AdErrorEvent(error,context));
+          },0);
+        };
+        function AdsRequest(){this.adTagUrl='';this.adsResponse=null;this.linearAdSlotWidth=0;this.linearAdSlotHeight=0;this.nonLinearAdSlotWidth=0;this.nonLinearAdSlotHeight=0;this.forceNonLinearFullSlot=false;this.vastLoadTimeout=5000;}
+        AdsRequest.prototype.setAdWillAutoPlay=noop;AdsRequest.prototype.setAdWillPlayMuted=noop;AdsRequest.prototype.setContinuousPlayback=noop;
+        function AdsRenderingSettings(){this.restoreCustomPlaybackStateOnAdBreakComplete=false;this.enablePreloading=false;this.uiElements=null;this.loadVideoTimeout=8000;this.mimeTypes=null;this.bitrate=-1;}
+        function CompanionAdSelectionSettings(){}
+        CompanionAdSelectionSettings.CreativeType={ALL:'All',FLASH:'Flash',IMAGE:'Image'};
+        CompanionAdSelectionSettings.ResourceType={ALL:'All',HTML:'Html',IFRAME:'IFrame',STATIC:'Static'};
+        CompanionAdSelectionSettings.SizeCriteria={IGNORE:'IgnoreSize',SELECT_EXACT_MATCH:'SelectExactMatch',SELECT_NEAR_MATCH:'SelectNearMatch'};
+        var ima={
+          VERSION:'3.0.0',settings:settings,
+          AdDisplayContainer:AdDisplayContainer,AdsLoader:AdsLoader,AdsRequest:AdsRequest,AdsRenderingSettings:AdsRenderingSettings,
+          AdError:AdError,AdErrorEvent:AdErrorEvent,AdEvent:AdEvent,AdsManagerLoadedEvent:AdsManagerLoadedEvent,
+          ImaSdkSettings:ImaSdkSettings,CompanionAdSelectionSettings:CompanionAdSelectionSettings,
+          ViewMode:{NORMAL:'normal',FULLSCREEN:'fullscreen'},
+          UiElements:{AD_ATTRIBUTION:'adAttribution',COUNTDOWN:'countdown'},
+          OmidAccessMode:{LIMITED:'limited',DOMAIN:'domain',FULL:'full'},
+          OmidVerificationVendor:{},
+          UniversalAdIdInfo:function(){},
+          AdCuePoints:function(){},
+          AdPodInfo:function(){},
+          CompanionAd:function(){}
+        };
+        window.google=window.google||{};
+        window.google.ima=ima;
         })();
         """;
 }
